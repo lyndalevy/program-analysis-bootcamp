@@ -66,10 +66,16 @@ expr:
   (* The PLUS rule is given as an example. Add the rest. *)
   | e1 = expr PLUS e2 = expr  { BinOp (Add, e1, e2) }
   (* EXERCISE: add rules for MINUS, STAR, SLASH *)
+  | e1 = expr MINUS e2 = expr { BinOp (Sub, e1, e2) }
+  | e1 = expr STAR e2 = expr  { BinOp (Mul, e1, e2) }
+  | e1 = expr SLASH e2 = expr { BinOp (Div, e1, e2) }
   | a = atom                   { a }
   ;
 
 atom:
   | n = INT                    { Num n }
   (* EXERCISE: add rules for IDENT, LPAREN/RPAREN, and unary MINUS *)
+  | x = IDENT                  { Var x }
+  | LPAREN e = expr RPAREN     { e }
+  | MINUS a = atom %prec UMINUS { Neg a }
   ;
