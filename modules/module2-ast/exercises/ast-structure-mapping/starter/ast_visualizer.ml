@@ -19,6 +19,17 @@ open Shared_ast.Ast_types
 (* ------------------------------------------------------------------ *)
 let indent n = String.make (n * 2) ' '
 
+(* ------------------------------------------------------------------ *)
+(* Operator helpers (used by both dump_ast and print_tree)            *)
+(* ------------------------------------------------------------------ *)
+let string_of_op = function
+  | Add -> "+" | Sub -> "-" | Mul -> "*" | Div -> "/"
+  | Eq  -> "==" | Neq -> "!=" | Lt -> "<" | Gt -> ">"
+  | Le  -> "<=" | Ge  -> ">=" | And -> "&&" | Or -> "||"
+
+let string_of_uop = function
+  | Neg -> "-" | Not -> "!"
+
 (* ================================================================== *)
 (* 1. dump_ast : stmt list -> string                                  *)
 (*                                                                    *)
@@ -33,76 +44,57 @@ let indent n = String.make (n * 2) ' '
 (*        IntLit(3)                                                   *)
 (* ================================================================== *)
 
-(* Dump a single expression at the given indentation depth.
-   Hint: use [indent depth] for the padding string, then match on the
-   expression and format each variant.  For compound nodes (BinOp, UnaryOp,
-   Call), recursively dump the sub-expressions at [depth + 1]. *)
 let rec dump_expr (depth : int) (e : expr) : string =
   let pad = indent depth in
   match e with
   | IntLit n ->
-    pad ^ "IntLit(" ^ string_of_int n ^ ")"
+    Printf.sprintf "%sIntLit(%d)" pad n
   | BoolLit b ->
-    pad ^ "BoolLit(" ^ string_of_bool b ^ ")"
+    Printf.sprintf "%sBoolLit(%b)" pad b
   | Var s ->
-    pad ^ "Var(\"" ^ s ^ "\")"
+    Printf.sprintf "%sVar(\"%s\")" pad s
   | BinOp (op, e1, e2) ->
-    let op_str = match op with
-      | Add -> "+" | Sub -> "-" | Mul -> "*" | Div -> "/"
-      | Eq -> "==" | Neq -> "!=" | Lt -> "<" | Gt -> ">"
-      | Le -> "<=" | Ge -> ">=" | And -> "&&" | Or -> "||"
-    in
-    pad ^ "BinOp(" ^ op_str ^ ")\n" ^
-    dump_expr (depth + 1) e1 ^ "\n" ^
-    dump_expr (depth + 1) e2
+    Printf.sprintf "%sBinOp(%s)\n%s\n%s"
+      pad (string_of_op op)
+      (dump_expr (depth + 1) e1)
+      (dump_expr (depth + 1) e2)
   | UnaryOp (op, e1) ->
-    let op_str = match op with Neg -> "-" | Not -> "!" in
-    pad ^ "UnaryOp(" ^ op_str ^ ")\n" ^
-    dump_expr (depth + 1) e1
+    Printf.sprintf "%sUnaryOp(%s)\n%s"
+      pad (string_of_uop op)
+      (dump_expr (depth + 1) e1)
   | Call (name, args) ->
-    pad ^ "Call(\"" ^ name ^ "\")\n" ^
-    String.concat "\n" (List.map (dump_expr (depth + 1)) args)
+    let args_str = String.concat "\n" (List.map (dump_expr (depth + 1)) args) in
+    if args = [] then Printf.sprintf "%sCall(\"%s\")" pad name
+    else Printf.sprintf "%sCall(\"%s\")\n%s" pad name args_str
 
-(* Dump a single statement at the given indentation depth.
-   For statements that contain expressions (Assign, If, While, Return, Print),
-   use dump_expr at [depth + 1].
-   For statements that contain sub-statement lists (If, While, Block),
-   use dump_stmts at [depth + 1]. *)
 and dump_stmt (depth : int) (s : stmt) : string =
   let pad = indent depth in
   match s with
   | Assign (v, e) ->
-    pad ^ "Assign(\"" ^ v ^ "\")\n" ^
-    dump_expr (depth + 1) e
+    Printf.sprintf "%sAssign(\"%s\")\n%s" pad v (dump_expr (depth + 1) e)
   | If (cond, then_b, else_b) ->
-    pad ^ "If\n" ^
-    dump_expr (depth + 1) cond ^ "\n" ^
-    pad ^ "Then\n" ^
-    dump_stmts (depth + 1) then_b ^ "\n" ^
-    pad ^ "Else\n" ^
-    dump_stmts (depth + 1) else_b
+    Printf.sprintf "%sIf\n%s\n%sThen\n%s\n%sElse\n%s"
+      pad (dump_expr (depth + 1) cond)
+      pad (dump_stmts (depth + 1) then_b)
+      pad (dump_stmts (depth + 1) else_b)
   | While (cond, body) ->
-    pad ^ "While\n" ^
-    dump_expr (depth + 1) cond ^ "\n" ^
-    pad ^ "Body\n" ^
-    dump_stmts (depth + 1) body
+    Printf.sprintf "%sWhile\n%s\n%sBody\n%s"
+      pad (dump_expr (depth + 1) cond)
+      pad (dump_stmts (depth + 1) body)
   | Return None ->
-    pad ^ "Return()"
+    Printf.sprintf "%sReturn()" pad
   | Return (Some e) ->
-    pad ^ "Return\n" ^
-    dump_expr (depth + 1) e
+    Printf.sprintf "%sReturn\n%s" pad (dump_expr (depth + 1) e)
   | Print exprs ->
-    pad ^ "Print\n" ^
-    String.concat "\n" (List.map (dump_expr (depth + 1)) exprs)
+    let args_str = String.concat "\n" (List.map (dump_expr (depth + 1)) exprs) in
+    if exprs = [] then Printf.sprintf "%sPrint" pad
+    else Printf.sprintf "%sPrint\n%s" pad args_str
   | Block stmts ->
-    pad ^ "Block\n" ^
-    dump_stmts (depth + 1) stmts
+    Printf.sprintf "%sBlock\n%s" pad (dump_stmts (depth + 1) stmts)
 
-(* Dump a list of statements, joining them with newlines. *)
 and dump_stmts (depth : int) (stmts : stmt list) : string =
   String.concat "\n" (List.map (dump_stmt depth) stmts)
 
-(* Top-level entry point: dump an entire function body. *)
 let dump_ast (stmts : stmt list) : string =
   dump_stmts 0 stmts
 
@@ -121,19 +113,12 @@ let dump_ast (stmts : stmt list) : string =
 (*                   "UnaryOp", "Call"                                *)
 (* ================================================================== *)
 
-(* Helper: increment the count for [key] in an association list.
-   If the key is not present, add it with count 1. *)
 let inc (key : string) (counts : (string * int) list) : (string * int) list =
-  let rec loop acc = function
-    | [] -> List.rev_append acc [(key, 1)]
-    | (k, v) :: rest when k = key -> List.rev_append acc ((k, v + 1) :: rest)
-    | x :: rest -> loop (x :: acc) rest
-  in
-  loop [] counts
+  if List.mem_assoc key counts then
+    List.map (fun (k, v) -> if k = key then (k, v + 1) else (k, v)) counts
+  else
+    counts @ [(key, 1)]
 
-(* Count node types inside an expression, accumulating into [acc].
-   Match on each expr variant, use [inc] to add its type name, then
-   recurse into any sub-expressions. *)
 let rec count_expr (acc : (string * int) list) (e : expr) : (string * int) list =
   match e with
   | IntLit _ ->
@@ -143,48 +128,45 @@ let rec count_expr (acc : (string * int) list) (e : expr) : (string * int) list 
   | Var _ ->
     inc "Var" acc
   | BinOp (_, e1, e2) ->
-    let acc' = inc "BinOp" acc in
-    let acc'' = count_expr acc' e1 in
-    count_expr acc'' e2
+    let acc = inc "BinOp" acc in
+    let acc = count_expr acc e1 in
+    count_expr acc e2
   | UnaryOp (_, e1) ->
-    let acc' = inc "UnaryOp" acc in
-    count_expr acc' e1
+    let acc = inc "UnaryOp" acc in
+    count_expr acc e1
   | Call (_, args) ->
-    let acc' = inc "Call" acc in
-    List.fold_left count_expr acc' args
+    let acc = inc "Call" acc in
+    List.fold_left count_expr acc args
 
-(* Count node types inside a statement, accumulating into [acc]. *)
 and count_stmt (acc : (string * int) list) (s : stmt) : (string * int) list =
   match s with
   | Assign (_, e) ->
-    let acc' = inc "Assign" acc in
-    count_expr acc' e
+    let acc = inc "Assign" acc in
+    count_expr acc e
   | If (cond, then_b, else_b) ->
-    let acc' = inc "If" acc in
-    let acc'' = count_expr acc' cond in
-    let acc''' = count_stmts acc'' then_b in
-    count_stmts acc''' else_b
+    let acc = inc "If" acc in
+    let acc = count_expr acc cond in
+    let acc = count_stmts acc then_b in
+    count_stmts acc else_b
   | While (cond, body) ->
-    let acc' = inc "While" acc in
-    let acc'' = count_expr acc' cond in
-    count_stmts acc'' body
+    let acc = inc "While" acc in
+    let acc = count_expr acc cond in
+    count_stmts acc body
   | Return None ->
     inc "Return" acc
   | Return (Some e) ->
-    let acc' = inc "Return" acc in
-    count_expr acc' e
+    let acc = inc "Return" acc in
+    count_expr acc e
   | Print exprs ->
-    let acc' = inc "Print" acc in
-    List.fold_left count_expr acc' exprs
+    let acc = inc "Print" acc in
+    List.fold_left count_expr acc exprs
   | Block stmts ->
-    let acc' = inc "Block" acc in
-    count_stmts acc' stmts
+    let acc = inc "Block" acc in
+    count_stmts acc stmts
 
-(* Count across a list of statements. *)
 and count_stmts (acc : (string * int) list) (stmts : stmt list) : (string * int) list =
   List.fold_left count_stmt acc stmts
 
-(* Top-level entry point. *)
 let count_node_types (stmts : stmt list) : (string * int) list =
   count_stmts [] stmts
 
@@ -202,94 +184,46 @@ let count_node_types (stmts : stmt list) : (string * int) list =
 (*      }                                                             *)
 (* ================================================================== *)
 
-(* Convert an operator to its string symbol.
-   Add -> "+", Sub -> "-", Mul -> "*", Div -> "/",
-   Eq -> "==", Neq -> "!=", Lt -> "<", Gt -> ">",
-   Le -> "<=", Ge -> ">=", And -> "&&", Or -> "||" *)
-let string_of_op (op : op) : string =
-  match op with
-  | Add -> "+"
-  | Sub -> "-"
-  | Mul -> "*"
-  | Div -> "/"
-  | Eq -> "=="
-  | Neq -> "!="
-  | Lt -> "<"
-  | Gt -> ">"
-  | Le -> "<="
-  | Ge -> ">="
-  | And -> "&&"
-  | Or -> "||"
-
-(* Convert a unary operator to its string symbol. *)
-let string_of_uop (uop : uop) : string =
-  match uop with
-  | Neg -> "-"
-  | Not -> "!"
-
-(* Convert an expression to a string (parenthesized where needed).
-     - IntLit n   -> string_of_int n
-     - BoolLit b  -> string_of_bool b
-     - Var s      -> s
-     - BinOp      -> "(<left> <op> <right>)"
-     - UnaryOp    -> "(<op><expr>)"
-     - Call       -> "<name>(<arg1>, <arg2>, ...)" *)
 let rec expr_to_string (e : expr) : string =
   match e with
-  | IntLit n -> string_of_int n
-  | BoolLit b -> string_of_bool b
-  | Var s -> s
   | BinOp (op, e1, e2) ->
-    "(" ^ expr_to_string e1 ^ " " ^ string_of_op op ^ " " ^ expr_to_string e2 ^ ")"
-  | UnaryOp (uop, e1) ->
-    "(" ^ string_of_uop uop ^ expr_to_string e1 ^ ")"
+    Printf.sprintf "(%s %s %s)" (expr_to_string e1) (string_of_op op) (expr_to_string e2)
+  | UnaryOp (op, e1) ->
+    Printf.sprintf "(%s%s)" (string_of_uop op) (expr_to_string e1)
   | Call (name, args) ->
-    name ^ "(" ^ String.concat ", " (List.map expr_to_string args) ^ ")"
+    Printf.sprintf "%s(%s)" name (String.concat ", " (List.map expr_to_string args))
+  | IntLit n  -> string_of_int n
+  | BoolLit b -> string_of_bool b
+  | Var s     -> s
 
-(* Pretty-print a single statement at the given indentation level.
-     - Assign: "<pad><var> = <expr>;"
-     - If:     "<pad>if (<cond>) {\n<then>\n<pad>} else {\n<else>\n<pad>}"
-               (omit else clause if the else branch is [])
-     - While:  "<pad>while (<cond>) {\n<body>\n<pad>}"
-     - Return None:    "<pad>return;"
-     - Return Some e:  "<pad>return <expr>;"
-     - Print:  "<pad>print(<expr1>, <expr2>, ...);"
-     - Block:  "<pad>{\n<stmts>\n<pad>}" *)
 and pp_stmt (depth : int) (s : stmt) : string =
   let pad = indent depth in
   match s with
   | Assign (v, e) ->
-    pad ^ v ^ " = " ^ expr_to_string e ^ ";"
+    Printf.sprintf "%s%s = %s;" pad v (expr_to_string e)
   | If (cond, then_b, else_b) ->
-    let if_part = pad ^ "if (" ^ expr_to_string cond ^ ") {\n" ^
-                  pp_stmts (depth + 1) then_b ^ "\n" ^
-                  pad ^ "}" in
-    if else_b = [] then
-      if_part
-    else
-      if_part ^ " else {\n" ^
-      pp_stmts (depth + 1) else_b ^ "\n" ^
-      pad ^ "}"
+    let then_str = pp_stmts (depth + 1) then_b in
+    let else_part =
+      if else_b = [] then ""
+      else Printf.sprintf "\n%s} else {\n%s" pad (pp_stmts (depth + 1) else_b)
+    in
+    Printf.sprintf "%sif (%s) {\n%s%s\n%s}"
+      pad (expr_to_string cond) then_str else_part pad
   | While (cond, body) ->
-    pad ^ "while (" ^ expr_to_string cond ^ ") {\n" ^
-    pp_stmts (depth + 1) body ^ "\n" ^
-    pad ^ "}"
+    Printf.sprintf "%swhile (%s) {\n%s\n%s}"
+      pad (expr_to_string cond) (pp_stmts (depth + 1) body) pad
   | Return None ->
-    pad ^ "return;"
+    Printf.sprintf "%sreturn;" pad
   | Return (Some e) ->
-    pad ^ "return " ^ expr_to_string e ^ ";"
+    Printf.sprintf "%sreturn %s;" pad (expr_to_string e)
   | Print exprs ->
-    pad ^ "print(" ^ String.concat ", " (List.map expr_to_string exprs) ^ ");"
+    Printf.sprintf "%sprint(%s);" pad (String.concat ", " (List.map expr_to_string exprs))
   | Block stmts ->
-    pad ^ "{\n" ^
-    pp_stmts (depth + 1) stmts ^ "\n" ^
-    pad ^ "}"
+    Printf.sprintf "%s{\n%s\n%s}" pad (pp_stmts (depth + 1) stmts) pad
 
-(* Pretty-print a list of statements, joining with newlines. *)
 and pp_stmts (depth : int) (stmts : stmt list) : string =
   String.concat "\n" (List.map (pp_stmt depth) stmts)
 
-(* Top-level entry point. *)
 let print_tree (stmts : stmt list) : string =
   pp_stmts 0 stmts
 
